@@ -18,15 +18,109 @@ import android.app.NotificationManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import android.content.Context
+import android.Manifest
+import android.util.Log
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 
 
 class MainActivity : ComponentActivity() {
+
+    // 🔐 Permission constants
+    private val FOREGROUND_PERMISSIONS = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    )
+
+    private val PERMISSION_REQUEST_CODE = 1001
+
+    private val BACKGROUND_PERMISSION = Manifest.permission.ACCESS_BACKGROUND_LOCATION
+
+    // 🔍 Check if permissions are granted
+    private fun hasForegroundPermissions(): Boolean {
+        return FOREGROUND_PERMISSIONS.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun hasBackgroundPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, BACKGROUND_PERMISSION) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestForegroundPermissions() {
+        ActivityCompat.requestPermissions(
+            this,
+            FOREGROUND_PERMISSIONS,
+            PERMISSION_REQUEST_CODE
+        )
+    }
+
+    private fun requestBackgroundPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(BACKGROUND_PERMISSION),
+            PERMISSION_REQUEST_CODE + 1 // different request code
+        )
+    }
+
+
+    // 🧠 Your existing onCreate()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (!hasForegroundPermissions()) {
+            requestForegroundPermissions()
+        } else if (!hasBackgroundPermission()) {
+            requestBackgroundPermission()
+        }
+
+        TrackingManager.init(applicationContext)
+
         setContent {
             ParkingAutomationTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     NotificationAccessScreen(modifier = Modifier.padding(innerPadding))
+                }
+            }
+        }
+    }
+
+
+    // ✅ Handle user's permission response
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        when (requestCode) {
+            PERMISSION_REQUEST_CODE -> {
+                if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                    Log.d("Permissions", "Foreground location permissions granted")
+                    // Request background permission if not already granted
+                    if (!hasBackgroundPermission()) {
+                        requestBackgroundPermission()
+                    }
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Foreground location permissions are required for the app to work.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+
+            PERMISSION_REQUEST_CODE + 1 -> {
+                if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                    Log.d("Permissions", "Background location permission granted")
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Background location permission is required for geofencing.",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }

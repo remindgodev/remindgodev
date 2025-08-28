@@ -10,23 +10,35 @@ import com.google.android.gms.location.GeofencingEvent
 class GeofenceBroadcastReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        val geofencingEvent = GeofencingEvent.fromIntent(intent)
+        val event = GeofencingEvent.fromIntent(intent)
 
-        if (geofencingEvent.hasError()) {
-            Log.e("GeofenceReceiver", "Error: ${geofencingEvent.errorCode}")
+        if (event == null) {
+            Log.e("GeofenceReceiver", "Received null GeofencingEvent")
             return
         }
 
-        val geofenceTransition = geofencingEvent.geofenceTransition
-
-        val transitionType = when (geofenceTransition) {
-            Geofence.GEOFENCE_TRANSITION_ENTER -> "ENTER"
-            Geofence.GEOFENCE_TRANSITION_EXIT -> "EXIT"
-            else -> "UNKNOWN"
+        if (event.hasError()) {
+            Log.e("GeofenceReceiver", "Error: ${event.errorCode}")
+            return
         }
 
-        Log.d("GeofenceReceiver", "Geofence transition detected: $transitionType")
+        val transition = event.geofenceTransition
+        val ids = event.triggeringGeofences?.joinToString { it.requestId } ?: "[]"
+        val loc = event.triggeringLocation
+        Log.d("GeofenceReceiver", "Geofence transition=$transition ids=$ids loc=$loc")
 
-        // 🔔 Optional: Handle transition here, e.g., trigger motion check or reminder logic
+        when (transition) {
+            Geofence.GEOFENCE_TRANSITION_ENTER -> {
+                Log.d("GeofenceReceiver", "🚪 ENTER geofence: $ids")
+                TrackingManager.onGeofenceEnter(context.applicationContext)
+            }
+            Geofence.GEOFENCE_TRANSITION_EXIT -> {
+                Log.d("GeofenceReceiver", "🏃 EXIT geofence: $ids")
+                TrackingManager.onGeofenceExit(context.applicationContext)
+            }
+            else -> {
+                Log.w("GeofenceReceiver", "UNKNOWN transition=$transition for $ids")
+            }
+        }
     }
 }

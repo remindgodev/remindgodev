@@ -3,6 +3,7 @@ package com.example.parkingautomation
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.example.parkingautomation.TrackingManager
 
 class RingGoNotificationListener : NotificationListenerService() {
 
@@ -21,6 +22,16 @@ class RingGoNotificationListener : NotificationListenerService() {
             if (title.contains("parked", ignoreCase = true) || text.contains("Zone")) {
                 Log.d("RingGoNotif", "✅ Simulated Session START")
                 // TODO: Save location, start tracking
+
+                TrackingManager.saveCurrentLocationOnSessionStart(
+                    context = applicationContext,
+                    onSuccess = {
+                        Log.d("RingGoNotif", "✅ Location saved and geofence added")
+                    },
+                    onFailure = {
+                        Log.e("RingGoNotif", "❌ Failed to save location: ${it.message}")
+                    }
+                )
             }
 
             if (title.contains("ended", ignoreCase = true) || text.contains("session ended", ignoreCase = true)) {

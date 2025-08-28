@@ -23,6 +23,9 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
+import com.google.android.gms.location.GeofencingClient
+import com.google.android.gms.location.LocationServices
+
 
 
 class MainActivity : ComponentActivity() {
@@ -64,10 +67,13 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    lateinit var geofencingClient: GeofencingClient
 
     // 🧠 Your existing onCreate()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        geofencingClient = LocationServices.getGeofencingClient(applicationContext)
 
         if (!hasForegroundPermissions()) {
             requestForegroundPermissions()

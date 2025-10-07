@@ -40,6 +40,10 @@ class MainActivity : ComponentActivity() {
 
     private val BACKGROUND_PERMISSION = Manifest.permission.ACCESS_BACKGROUND_LOCATION
 
+    private val activityRecPermission = Manifest.permission.ACTIVITY_RECOGNITION
+// request it similarly to your other permissions
+
+
     // 🔍 Check if permissions are granted
     private fun hasForegroundPermissions(): Boolean {
         return FOREGROUND_PERMISSIONS.all {

@@ -8,6 +8,7 @@ import com.example.parkingautomation.TrackingManager
 class RingGoNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        val ctx = applicationContext
         val packageName = sbn.packageName
         val extras = sbn.notification.extras
         val title = extras.getString("android.title") ?: ""
@@ -21,7 +22,6 @@ class RingGoNotificationListener : NotificationListenerService() {
 
             if (title.contains("parked", ignoreCase = true) || text.contains("Zone")) {
                 Log.d("RingGoNotif", "✅ Simulated Session START")
-                // TODO: Save location, start tracking
 
                 TrackingManager.saveCurrentLocationOnSessionStart(
                     context = applicationContext,
@@ -34,10 +34,20 @@ class RingGoNotificationListener : NotificationListenerService() {
                 )
             }
 
-            if (title.contains("ended", ignoreCase = true) || text.contains("session ended", ignoreCase = true)) {
-                Log.d("RingGoNotif", "🛑 Simulated Session END")
-                // TODO: Stop tracking
+            if (
+                title.contains("ended", ignoreCase = true) ||
+                text.contains("session ended", ignoreCase = true) ||
+                text.contains("parking ended", ignoreCase = true) ||
+                text.contains("has ended", ignoreCase = true) ||
+                text.contains("ended successfully", ignoreCase = true) ||
+                text.contains("stopped your session", ignoreCase = true) ||
+                text.contains("session cancelled", ignoreCase = true) ||
+                text.contains("parking stopped", ignoreCase = true)
+            ) {
+                Log.d("RingGoNotif", "🛑 Session END detected")
+                TrackingManager.onSessionEnded(applicationContext)
             }
+
         }
     }
 }

@@ -15,6 +15,9 @@ import android.content.Intent
 import android.os.Build
 import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionClient
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import androidx.core.app.NotificationCompat
 
 
 
@@ -27,6 +30,13 @@ object TrackingManager {
     private var isOutsideGeofence: Boolean = false
     private var lastReminderAt: Long = 0L
 
+    // --- New state for re-entry logic ---
+    private var initialEnterConsumed = false   // ignore the very first ENTER after add
+    private var armedAfterReentry = false      // set true on genuine re-ENTER (back to car)
+    private var insideGeofence = false         // our current inside/outside view
+    private var lastInVehicleAt: Long = 0L     // last time we saw IN_VEHICLE
+    private const val DRIVE_RECENCY_MS = 90_000L // 90s window to count as “recent driving”
+
 
 
     // ✅ Initialize once (e.g., from MainActivity)
@@ -37,6 +47,7 @@ object TrackingManager {
     }
 
     // ✅ Get location and store it when session starts
+    // this function is called in RingoNotificationListener when session starts
     fun saveCurrentLocationOnSessionStart(
         context: Context,
         onSuccess: (Location) -> Unit,
@@ -125,6 +136,50 @@ object TrackingManager {
         }
     }
 
+    // TODO: Replace with your real session state (e.g., set true on RingGo "start" and false on "end")
+    private fun isSessionActive(context: Context): Boolean {
+        // Quick placeholder: read a flag from SharedPreferences (default true while testing)
+        val prefs = context.getSharedPreferences("parking_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("session_active", true) // <- set this properly in your NotificationListener
+    }
+
+
+    fun onGeofenceEnter(context: Context) {
+        insideGeofence = true
+        val appCtx = context.applicationContext
+
+        // The very first ENTER often fires immediately when a geofence is added.
+        if (!initialEnterConsumed) {
+            initialEnterConsumed = true
+            Log.d("GeofenceState", "Initial ENTER consumed; not arming yet.")
+            return
+        }
+
+        // Genuine re-ENTER: we’re back to the car → arm and start Activity Recognition
+        armedAfterReentry = true
+        startActivityUpdates(appCtx)
+        Log.d("GeofenceState", "ENTER (re-entry) → armed=true, started ActivityRecognition.")
+    }
+
+    fun onGeofenceExit(context: Context) {
+        insideGeofence = false
+        val appCtx = context.applicationContext
+        val now = System.currentTimeMillis()
+        val droveRecently = (now - lastInVehicleAt) <= DRIVE_RECENCY_MS
+
+        // If we had re-entered (armed) and recently saw driving, fire the reminder now
+        if (armedAfterReentry && isSessionActive(appCtx) && droveRecently) {
+            sendDriveAwayReminder(appCtx)
+            armedAfterReentry = false
+            stopActivityUpdates(appCtx)
+            Log.d("GeofenceState", "EXIT after re-entry with recent driving → reminder sent.")
+        } else {
+            Log.d("GeofenceState", "EXIT: armed=$armedAfterReentry, droveRecently=$droveRecently → no reminder yet.")
+            // AR stays running from the prior ENTER; if IN_VEHICLE arrives while outside, onDrivingDetected will fire the reminder.
+        }
+    }
+
+
     private const val ACTIVITY_UPDATES_RC = 2001
 
     private fun getActivityUpdatesPendingIntent(context: Context): PendingIntent {
@@ -144,25 +199,7 @@ object TrackingManager {
         )
     }
 
-    fun onGeofenceExit(context: Context) {
-        isOutsideGeofence = true
-        Log.d("GeofenceState", "EXIT → outside=true. Starting activity updates.")
-        startActivityUpdates(context.applicationContext)
-    }
 
-    fun onGeofenceEnter(context: Context) {
-        isOutsideGeofence = false
-        Log.d("GeofenceState", "ENTER → outside=false. Stopping activity updates.")
-        stopActivityUpdates(context.applicationContext)
-    }
-
-
-    // TODO: Replace with your real session state (e.g., set true on RingGo "start" and false on "end")
-    private fun isSessionActive(context: Context): Boolean {
-        // Quick placeholder: read a flag from SharedPreferences (default true while testing)
-        val prefs = context.getSharedPreferences("parking_prefs", Context.MODE_PRIVATE)
-        return prefs.getBoolean("session_active", true) // <- set this properly in your NotificationListener
-    }
 
     fun startActivityUpdates(context: Context) {
         val appCtx = context.applicationContext
@@ -185,61 +222,60 @@ object TrackingManager {
             .addOnFailureListener { e -> Log.e("ActivityUpdates", "⚠️ Stop failed: ${e.message}", e) }
     }
 
+    // This bit has will fire the reminder if it detects in vehicle for first time and yo are outside
+    // geofence.  If you park go outside geofence and get in another car it will send reminder even
+    // if you want to keep parking active rare but could occur
     fun onDrivingDetected(context: Context) {
         val appCtx = context.applicationContext
+        lastInVehicleAt = System.currentTimeMillis()
 
-        // 1) Only alert if we’re currently outside the geofence
-        if (!isOutsideGeofence) {
-            Log.d("ActivityUpdates", "Driving detected but still inside geofence — no reminder.")
-            return
+        // If we re-entered (armed) and we're already outside, alert immediately
+        if (armedAfterReentry && !insideGeofence && isSessionActive(appCtx)) {
+            sendDriveAwayReminder(appCtx)
+            armedAfterReentry = false
+            stopActivityUpdates(appCtx)
+            Log.d("ActivityUpdates", "Reminder sent on driving while outside.")
+        } else {
+            Log.d("ActivityUpdates", "Driving detected. Armed=$armedAfterReentry, inside=$insideGeofence")
         }
+    }
 
-        // 2) Only alert if the parking session is still active
-        if (!isSessionActive(appCtx)) {
-            Log.d("ActivityUpdates", "No active session — no reminder.")
-            stopActivityUpdates(appCtx) // optional: stop listening if no session
-            return
-        }
-
-        // 3) Throttle reminders (e.g., at most once per 2 minutes)
-        val now = System.currentTimeMillis()
-        if (now - lastReminderAt < 2 * 60_000L) {
-            Log.d("ActivityUpdates", "Reminder throttled.")
-            return
-        }
-        lastReminderAt = now
-
+        // old Chatgpt suggestions may be useful especially 5 if not already above
         // 4) Send the reminder notification
-        sendDriveAwayReminder(appCtx)
+        //sendDriveAwayReminder(appCtx)
 
         // 5) Optional: stop activity updates after alert to save battery
-        stopActivityUpdates(appCtx)
-    }
+        //stopActivityUpdates(appCtx)
+
 
     private fun sendDriveAwayReminder(context: Context) {
         val channelId = "parking_reminders"
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val channel = android.app.NotificationChannel(
-                channelId,
-                "Parking Reminders",
-                android.app.NotificationManager.IMPORTANCE_HIGH
-            )
-            nm.createNotificationChannel(channel)
+            val ch = NotificationChannel(channelId, "Parking Reminders", NotificationManager.IMPORTANCE_HIGH)
+            nm.createNotificationChannel(ch)
         }
 
-        val notif = androidx.core.app.NotificationCompat.Builder(context, channelId)
+        val notif = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle("You're leaving your parking zone")
             .setContentText("If you’re done, cancel your RingGo session now.")
-            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
-            // TODO: add contentIntent to open RingGo if you want, using getLaunchIntentForPackage(...)
             .build()
 
         nm.notify(1002, notif)
     }
+    fun onSessionEnded(context: Context) {
+        val appCtx = context.applicationContext
+        armedAfterReentry = false
+        initialEnterConsumed = false
+        stopActivityUpdates(appCtx)
+        GeofenceManager.removeGeofence(appCtx)
+        Log.d("Session", "Session ended: state reset, AR stopped.")
+    }
+
 }
 
 

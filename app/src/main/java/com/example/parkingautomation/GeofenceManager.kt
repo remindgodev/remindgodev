@@ -70,7 +70,6 @@ object GeofenceManager {
         return PendingIntent.getBroadcast(context, 1001, intent, flags)
     }
 
-
     fun removeGeofence(context: Context) {
         geofencingClient.removeGeofences(getGeofencePendingIntent(context))
             .addOnSuccessListener {
